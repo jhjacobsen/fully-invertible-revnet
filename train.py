@@ -148,14 +148,19 @@ for epoch in range(start_epoch, args.n_epochs):
         
         # log_det_jacobian cost (and some prior from Split OP) 
         zn = []
+        # get final layer output z
         z, objective, zn = model(img, objective, zn)
+        # get logits from z
         logits = z[:,:10,2,2]
+        # normalize
         logits = bn(logits)
         _zn = z.clone()
+        # set logit dimensions to constant values removing class information and leaving nuisance information intact
         _zn[:,:10,2,2] = 0.1
+        # flatten
         _zn = torch.cat((_zn.view(_zn.size(0),-1),zn[0].view(zn[0].size(0),-1),zn[1].view(zn[1].size(0),-1)),dim=1) 
 
-        #ac.train()
+        # train anticlassifier ac for 5 iterations to predict labels well from nuisance dimensions
         for k in range(5):
           logits_ac = ac(_zn.detach())
           pyx_ac_loss = ce_loss(logits_ac, label)
@@ -163,13 +168,18 @@ for epoch in range(start_epoch, args.n_epochs):
           optim_ac.zero_grad()
           ac_obj.backward()
           optim_ac.step()
-        #ac.eval()
-
+        
+        # get logits of anticlassifier
         logits_ac = ac(_zn)
+        # crossentropy loss on signal dimensions to be minimized
         pyx_loss = ce_loss(logits,label)
+        # crossentropy loss on nuisance dimensions to be maximized
         pyx_ac_loss = ce_loss(logits_ac,label_ac)
 
-        nll = (-objective) / float(np.log(2.) * np.prod(img.shape[1:]))+ pyx_loss + 0.05*pyx_ac_loss
+        # jointly minimizing NLL (for stability) 
+        # crossentropy on classifier logits and 
+        # maximizing crossentropy on anticlassifier logits
+        nll = (-objective) / float(np.log(2.) * np.prod(img.shape[1:]))+ pyx_loss - 0.05*pyx_ac_loss
         #nll = pyx_loss - 0.1*pyx_ac_loss
         
         # Generative loss
